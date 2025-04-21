@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PDF Editor</title>
+    <style>
+        #pdf-preview { border: 1px solid #ccc; margin: 20px 0; }
+        .text-layer { position: relative; }
+        .editable-text { 
+            position: absolute; 
+            cursor: text;
+            border: 1px dashed transparent;
+        }
+        .editable-text:hover { border-color: #0099ff; }
+    </style>
+</head>
+<body>
+    <input type="file" id="pdfInput" accept="application/pdf">
+    <button onclick="downloadEdited()">Download Edited PDF</button>
+    <div id="pdf-preview"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+    <script>
+        let pdfDoc = null;
+        let editData = {};
+
+        document.getElementById('pdfInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if(file) loadPDF(file);
+        });
+
+        async function loadPDF(file) {
+            const reader = new FileReader();
+            reader.onload = async function(e) {
+                const pdfData = new Uint8Array(e.target.result);
+                pdfDoc = await pdfjsLib.getDocument({data: pdfData}).promise;
+                renderPDF();
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        async function renderPDF() {
+            const container = document.getElementById('pdf-preview');
+            container.innerHTML = '';
+            
+            for(let i=1; i<=pdfDoc.numPages; i++) {
+                const page = await pdfDoc.getPage(i);
+                const viewport = page.getViewport({scale: 1.5});
+                
+                // Render PDF page
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                canvas.height = viewport.height;
+                canvas.width = viewport.width;
+                await page.render({canvasContext: ctx, viewport}).promise;
+                
+                // Create text layer
+                const textLayer = await page.getTextContent();
+                const textDiv = document.createElement('div');
+                textDiv.className = 'text-layer';
+                textDiv.style.position = 'relative';
+                textDiv.style.height = `${viewport.height}px`;
+                textDiv.style.width = `${viewport.width}px`;
+
+                // Process text items
+                textLayer.items.forEach((textItem, index) => {
+                    const textElement = document.createElement('div');
+                    textElement.className = 'editable-text';
+                    textElement.contentEditable = true;
+                    
+                    // Set position and style
+                    textElement.style.left = `${textItem.transform[4]}px`;
+                    textElement.style.top = `${textItem.transform[5]}px`;
+                    textElement.style.fontSize = `${textItem.height}px`;
+                    textElement.textContent = textItem.str;
+
+                    // Store original data
+                    textElement.dataset.page = i;
+                    textElement.dataset.index = index;
+                    
+                    textElement.addEventListener('input', updateEditData);
+                    textDiv.appendChild(textElement);
+                });
+
+                container.appendChild(canvas);
+                container.appendChild(textDiv);
+            }
+        }
+
+        function updateEditData(e) {
+            const elem = e.target;
+            editData[`p${elem.dataset.page}-i${elem.dataset.index}`] = {
+                text: elem.innerText,
+                x: parseFloat(elem.style.left),
+                y: parseFloat(elem.style.top),
+                size: parseFloat(elem.style.fontSize)
+            };
+        }
+
+        async function downloadEdited() {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            
+            // Add edited text (basic example)
+            Object.values(editData).forEach(edit => {
+                doc.setFontSize(edit.size);
+                doc.text(edit.text, edit.x, edit.y);
+            });
+            
+            doc.save('edited-pdf.pdf');
+        }
+    </script>
+</body>
+</html>
